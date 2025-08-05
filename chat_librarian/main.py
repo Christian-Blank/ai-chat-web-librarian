@@ -5,80 +5,131 @@ import typer
 from playwright.async_api import Error
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 
-# MODIFIED: Import from the new 'downloader' module and function name
-from chat_librarian.downloader import download_last_chat
+from chat_librarian.downloader import ChatDownloader
 
 app = typer.Typer(
-    name="chat-scraper",
-    # MODIFIED: Help text
+    name="chat-librarian",
     help="A CLI to download your ChatGPT conversations.",
     add_completion=False,
+    no_args_is_help=True,
 )
 console = Console()
 
+# --- THIS IS THE FUNCTION WITH THE FIX ---
+# MODIFIED: Added 'first_run: bool' parameter
+async def run_interactive_session(port: Optional[int], first_run: bool):
+    """Handles the interactive chat selection and download."""
+    # The 'is_first_run' parameter is now correctly passed to the downloader
+    async with ChatDownloader(connect_port=port, is_first_run=first_run) as downloader:
+        with console.status("[bold green]Fetching chat list..."):
+            chats = await downloader.list_chats()
+        
+        if not chats:
+            console.print("[bold red]No chats found in the sidebar.[/bold red]")
+            return
 
-@app.command()
-def last(
-    port: Optional[int] = typer.Option(
-        None,
-        "--port",
-        help="Connect to a running Chrome instance on this port (e.g., 9222).",
-    ),
-    first_run: bool = typer.Option(
-        False,
-        "--first-run",
-        help="For standalone mode: Run in a visible browser to log in for the first time.",
-    )
-):
-    """
-    Downloads the most recent chat from your history.
-    """
-    if port and first_run:
-        console.print("[bold red]Error:[/bold red] --port and --first-run are mutually exclusive.")
-        raise typer.Exit(code=1)
-
-    if first_run:
-        console.print(
-            Panel(
-                "[bold yellow]ACTION REQUIRED[/bold yellow]\n\nA browser window will open. Please log in to your OpenAI account. The script will continue automatically after you're logged in.",
-                title="First-Time Setup (Standalone Mode)",
-                border_style="yellow",
-            )
-        )
-    
-    if port:
-        console.print(f"[bold blue]Attempting to connect to Chrome on port {port}...[/bold blue]")
-
-    # MODIFIED: Status text
-    with console.status("[bold green]Downloading in progress...", spinner="dots") as status:
+        table = Table(title="Available ChatGPT Conversations", show_header=True, header_style="bold magenta")
+        table.add_column("#", style="dim", width=4)
+        table.add_column("Title")
+        
+        for i, chat in enumerate(chats, 1):
+            table.add_row(str(i), chat['title'])
+        
+        console.print(table)
+        
         try:
-            status.update("Launching browser...")
-            # MODIFIED: Call the renamed async function
-            saved_file_path = asyncio.run(download_last_chat(connect_port=port, is_first_run=first_run))
+            choice_str = typer.prompt("\nEnter the number of the chat to download (or 'q' to quit)")
+            if choice_str.lower() == 'q':
+                console.print("Quitting.")
+                return
+
+            choice = int(choice_str) - 1
+            if not 0 <= choice < len(chats):
+                console.print("[bold red]Invalid selection.[/bold red]")
+                return
+            
+            selected_chat = chats[choice]
+            
+            with console.status(f"[bold green]Downloading '{selected_chat['title']}'..."):
+                 saved_file_path = await downloader.download_chat(
+                     chat_title=selected_chat['title'],
+                     chat_locator=selected_chat['locator']
+                 )
             
             console.print(
                 Panel(
                     f"[bold green]✅ Success![/bold green]\n\nConversation saved to:\n[cyan]{saved_file_path}[/cyan]",
-                    # MODIFIED: Panel title
                     title="Download Complete",
                     border_style="green",
                 )
             )
-        except Error as e:
-            error_message = str(e)
-            if "net::ERR_CONNECTION_REFUSED" in error_message:
-                error_message = f"Connection refused on port {port}. Is Chrome running with '--remote-debugging-port={port}'?"
+
+        except (ValueError, IndexError):
+            console.print("[bold red]Invalid input. Please enter a number from the list.[/bold red]")
+
+@app.command(name="select", help="Select a chat to download from an interactive list. [default]")
+def select_chat(
+    port: Optional[int] = typer.Option(None, "--port", help="Connect to a running Chrome instance on this port (e.g., 9222)."),
+    first_run: bool = typer.Option(False, "--first-run", help="For standalone mode: Run in a visible browser for the first time."),
+):
+    """The default command, allowing interactive chat selection."""
+    if first_run:
+        console.print(Panel("[bold yellow]ACTION REQUIRED[/bold yellow]\n\nA browser window will open. Please log in to your OpenAI account. The script will continue automatically after you're logged in.", title="First-Time Setup"))
+    
+    try:
+        # The call is now correct
+        asyncio.run(run_interactive_session(port, first_run))
+    except Error as e:
+        console.print(Panel(f"[bold red]❌ An Error Occurred[/bold red]\n\n[white]{e}[/white]", title="Download Failed", border_style="red"))
+        raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]Operation cancelled by user.[/bold yellow]")
+
+
+@app.command(name="last", help="Quickly download the most recent chat.")
+def download_last(
+    port: Optional[int] = typer.Option(None, "--port", help="Connect to a running Chrome instance on this port (e.g., 9222)."),
+    first_run: bool = typer.Option(False, "--first-run", help="For standalone mode: Run in a visible browser for the first time."),
+):
+    """Downloads the most recent chat non-interactively."""
+    if first_run:
+        console.print(Panel("[bold yellow]ACTION REQUIRED[/bold yellow]\n\nA browser window will open. Please log in to your OpenAI account. The script will continue automatically after you're logged in.", title="First-Time Setup"))
+
+    async def run_last_session():
+        # Pass the flag to the downloader here as well
+        async with ChatDownloader(connect_port=port, is_first_run=first_run) as downloader:
+            with console.status("[bold green]Fetching chat list..."):
+                chats = await downloader.list_chats()
+            
+            if not chats:
+                console.print("[bold red]No chats found in the sidebar.[/bold red]")
+                return
+
+            latest_chat = chats[0]
+            with console.status(f"[bold green]Downloading '{latest_chat['title']}'..."):
+                 saved_file_path = await downloader.download_chat(
+                     chat_title=latest_chat['title'],
+                     chat_locator=latest_chat['locator']
+                 )
             
             console.print(
                 Panel(
-                    f"[bold red]❌ An Error Occurred[/bold red]\n\n[white]{error_message}[/white]",
-                    # MODIFIED: Panel title
-                    title="Download Failed",
-                    border_style="red",
+                    f"[bold green]✅ Success![/bold green]\n\nConversation saved to:\n[cyan]{saved_file_path}[/cyan]",
+                    title="Download Complete",
+                    border_style="green",
                 )
             )
-            raise typer.Exit(code=1)
+
+    try:
+        asyncio.run(run_last_session())
+    except Error as e:
+        console.print(Panel(f"[bold red]❌ An Error Occurred[/bold red]\n\n[white]{e}[/white]", title="Download Failed", border_style="red"))
+        raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]Operation cancelled by user.[/bold yellow]")
+
 
 if __name__ == "__main__":
     app()
