@@ -1,0 +1,20 @@
+[project]
+name = "chat-librarian"
+version = "0.1.0"
+description = "A CLI tool to archive ChatGPT conversations."
+authors = [{ name = "Christian Blank", email = "christian@blank.dev" }]
+requires-python = ">=3.11" # Typer requires 3.8+, Playwright 3.10+
+dependencies = [
+    "typer>=0.16.0", # For the CLI, [all] includes rich for nice printing
+    "rich>=14.1.0",
+    "playwright>=1.54.0",
+    "playwright-stealth>=2.0.0",
+    "beautifulsoup4>=4.13.4",
+    "lxml>=4.9.0",
+]
+
+[project.scripts]
+chat-librarian = "chat_librarian.main:app"
+
+[tool.setuptools]
+packages = ["chat_librarian"]
