@@ -1,4 +1,3 @@
-import asyncio
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -15,7 +14,6 @@ CHAT_LINK_SELECTOR: str = 'a[href^="/c/"]'
 MESSAGE_AUTHOR_BLOCK_SELECTOR: str = "div[data-message-author-role]"
 
 def _sanitize_filename(name: str) -> str:
-    """Removes invalid characters from a string to make it a valid filename."""
     name = re.sub(r'[\\/*?:"<>|]', "", name)
     return name.strip()
 
@@ -29,8 +27,10 @@ class ChatDownloader:
         self.ACTION_TIMEOUT = 90000
 
     async def __aenter__(self):
+        """Initializes the browser and logs in with the most robust headless settings."""
         self.p = await async_playwright().start()
         stealth = Stealth()
+
         if self.connect_port:
             endpoint_url = f"http://localhost:{self.connect_port}"
             browser = await self.p.chromium.connect_over_cdp(endpoint_url)
@@ -41,13 +41,19 @@ class ChatDownloader:
             self.context = await self.p.chromium.launch_persistent_context(
                 user_data_dir=USER_DATA_DIR,
                 headless=not self.is_first_run,
-                slow_mo=50,
+                args=['--disable-blink-features=AutomationControlled'],
+                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+                viewport={'width': 1920, 'height': 1080},
+                screen={'width': 1920, 'height': 1080},
+                java_script_enabled=True,
             )
             await stealth.apply_stealth_async(self.context)
             self.page = self.context.pages[0] if self.context.pages else await self.context.new_page()
-        
+
         self.page.set_default_timeout(self.ACTION_TIMEOUT)
-        await self.page.goto(CHATGPT_URL)
+        
+        await self.page.goto(CHATGPT_URL, wait_until="domcontentloaded")
+        
         print("Checking for and dismissing any post-login modals...")
         try:
             dismiss_button = self.page.get_by_role("button", name="Okay, let’s go")
@@ -55,6 +61,7 @@ class ChatDownloader:
             print("Dismissed a welcome modal.")
         except Error:
             print("No initial modal found. Continuing.")
+
         return self
 
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -64,45 +71,27 @@ class ChatDownloader:
             await self.p.stop()
 
     async def list_chats(self) -> List[Dict[str, Any]]:
-        """Fetches ALL chat titles by simulating human-like scrolling."""
         print("Waiting for chat history to be fully loaded...")
         history_container = self.page.locator(HISTORY_CONTAINER_SELECTOR)
         chat_links_locator = history_container.locator(CHAT_LINK_SELECTOR)
-        
         await chat_links_locator.first.wait_for()
         print("Chat history is loaded. Scrolling to reveal all conversations...")
-
-        # --- NEW & IMPROVED SMART SCROLLING LOGIC ---
         last_count = 0
         scroll_attempts = 0
-        max_scroll_attempts = 5 # Failsafe to prevent infinite loops
-
+        max_scroll_attempts = 5
         while scroll_attempts < max_scroll_attempts:
-            # Hover over the last visible chat link to ensure focus is in the scrollable area
             await chat_links_locator.last.hover()
-            # Simulate scrolling the mouse wheel down
-            await self.page.mouse.wheel(0, 1000) # Scroll down by 1000 pixels
-            # Wait a moment for new content to lazy-load
-            await self.page.wait_for_timeout(1500) 
-            
+            await self.page.mouse.wheel(0, 1000)
+            await self.page.wait_for_timeout(1500)
             current_count = await chat_links_locator.count()
             print(f"  ...found {current_count} chats so far.")
-
             if current_count == last_count:
-                # If the count hasn't changed, we might be at the bottom.
-                # Increment our failsafe counter.
                 scroll_attempts += 1
             else:
-                # If we found new chats, reset the failsafe counter.
                 scroll_attempts = 0
-            
             last_count = current_count
-        
         print(f"Finished scrolling. Total chats found: {last_count}")
-        # --- END OF SMART SCROLLING LOGIC ---
-
         all_chats = await chat_links_locator.all()
-        
         chat_data = []
         for i, chat_locator in enumerate(all_chats):
             try:
@@ -111,8 +100,18 @@ class ChatDownloader:
                     chat_data.append({"index": i, "title": title.strip(), "locator": chat_locator})
             except Error:
                 print(f"Warning: Could not read title for chat at index {i}. Skipping.")
-
         return sorted(chat_data, key=lambda x: x['index'], reverse=True)
+
+    async def download_chat_by_title(self, target_title: str) -> Path:
+        all_chats = await self.list_chats()
+        found_chat = None
+        for chat in all_chats:
+            if chat['title'].lower() == target_title.lower():
+                found_chat = chat
+                break
+        if not found_chat:
+            raise ValueError(f"No chat found with the exact title (case-insensitive): '{target_title}'")
+        return await self.download_chat(chat_title=found_chat['title'], chat_locator=found_chat['locator'])
 
     async def download_chat(self, chat_title: str, chat_locator: Locator) -> Path:
         print(f"Targeting chat: '{chat_title}'")
@@ -177,3 +176,4 @@ class ChatDownloader:
                 level = int(element.name[1])
                 content_parts.append(f"{'#' * level} {element.get_text()}")
         return "\n\n".join(part for part in content_parts if part)
+    

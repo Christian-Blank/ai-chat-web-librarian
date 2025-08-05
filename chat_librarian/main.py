@@ -17,11 +17,8 @@ app = typer.Typer(
 )
 console = Console()
 
-# --- THIS IS THE FUNCTION WITH THE FIX ---
-# MODIFIED: Added 'first_run: bool' parameter
 async def run_interactive_session(port: Optional[int], first_run: bool):
     """Handles the interactive chat selection and download."""
-    # The 'is_first_run' parameter is now correctly passed to the downloader
     async with ChatDownloader(connect_port=port, is_first_run=first_run) as downloader:
         with console.status("[bold green]Fetching chat list..."):
             chats = await downloader.list_chats()
@@ -79,7 +76,6 @@ def select_chat(
         console.print(Panel("[bold yellow]ACTION REQUIRED[/bold yellow]\n\nA browser window will open. Please log in to your OpenAI account. The script will continue automatically after you're logged in.", title="First-Time Setup"))
     
     try:
-        # The call is now correct
         asyncio.run(run_interactive_session(port, first_run))
     except Error as e:
         console.print(Panel(f"[bold red]❌ An Error Occurred[/bold red]\n\n[white]{e}[/white]", title="Download Failed", border_style="red"))
@@ -98,7 +94,6 @@ def download_last(
         console.print(Panel("[bold yellow]ACTION REQUIRED[/bold yellow]\n\nA browser window will open. Please log in to your OpenAI account. The script will continue automatically after you're logged in.", title="First-Time Setup"))
 
     async def run_last_session():
-        # Pass the flag to the downloader here as well
         async with ChatDownloader(connect_port=port, is_first_run=first_run) as downloader:
             with console.status("[bold green]Fetching chat list..."):
                 chats = await downloader.list_chats()
@@ -130,6 +125,36 @@ def download_last(
     except KeyboardInterrupt:
         console.print("\n[bold yellow]Operation cancelled by user.[/bold yellow]")
 
+@app.command(name="title", help="Download a specific chat by its full title (case-insensitive).")
+def by_title(
+    title: str = typer.Argument(..., help="The exact, case-insensitive title of the chat to download."),
+    port: Optional[int] = typer.Option(None, "--port", help="Connect to a running Chrome instance on this port."),
+    first_run: bool = typer.Option(False, "--first-run", help="For standalone mode: Run in a visible browser for the first time."),
+):
+    """Downloads a chat by matching its title."""
+    if first_run:
+        console.print(Panel("[bold yellow]ACTION REQUIRED[/bold yellow]\n\nA browser window will open. Please log in to your OpenAI account. The script will continue automatically after you're logged in.", title="First-Time Setup"))
+
+    async def run_title_session():
+        async with ChatDownloader(connect_port=port, is_first_run=first_run) as downloader:
+            with console.status(f"[bold green]Searching for chat titled '{title}'..."):
+                saved_file_path = await downloader.download_chat_by_title(title)
+            
+            console.print(
+                Panel(
+                    f"[bold green]✅ Success![/bold green]\n\nConversation saved to:\n[cyan]{saved_file_path}[/cyan]",
+                    title="Download Complete",
+                    border_style="green",
+                )
+            )
+
+    try:
+        asyncio.run(run_title_session())
+    except (Error, ValueError) as e:
+        console.print(Panel(f"[bold red]❌ An Error Occurred[/bold red]\n\n[white]{e}[/white]", title="Download Failed", border_style="red"))
+        raise typer.Exit(code=1)
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]Operation cancelled by user.[/bold yellow]")
 
 if __name__ == "__main__":
     app()

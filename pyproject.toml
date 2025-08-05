@@ -1,6 +1,6 @@
 [project]
 name = "chat-librarian"
-version = "0.1.0"
+version = "1.0.0"
 description = "A CLI tool to archive ChatGPT conversations."
 authors = [{ name = "Christian Blank", email = "christian@blank.dev" }]
 requires-python = ">=3.11" # Typer requires 3.8+, Playwright 3.10+
