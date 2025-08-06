@@ -1,20 +1,55 @@
 [project]
 name = "chat-librarian"
-version = "1.0.0"
+version = "1.1.0" # Let's bump the version
 description = "A CLI tool to archive ChatGPT conversations."
 authors = [{ name = "Christian Blank", email = "christian@blank.dev" }]
-requires-python = ">=3.11" # Typer requires 3.8+, Playwright 3.10+
+requires-python = ">=3.13"
 dependencies = [
-    "typer>=0.16.0", # For the CLI, [all] includes rich for nice printing
+    "typer>=0.16.0",
     "rich>=14.1.0",
     "playwright>=1.54.0",
     "playwright-stealth>=2.0.0",
     "beautifulsoup4>=4.13.4",
-    "lxml>=4.9.0",
+    "lxml>=6.0.0",
 ]
 
 [project.scripts]
 chat-librarian = "chat_librarian.main:app"
 
+# NEW: Add a section for optional dependencies
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.12.7",
+    "mypy>=1.17.1"
+]
+
 [tool.setuptools]
 packages = ["chat_librarian"]
+
+[tool.ruff]
+# Set the minimum Python version to target for compatibility.
+target-version = "py311"
+
+[tool.ruff.lint]
+# Select the rule codes to enforce. A good starting set:
+# E/W: pycodestyle errors and warnings
+# F: Pyflakes
+# I: isort (import sorting)
+# TID: flake8-tidy-imports
+# ANN: flake8-annotations
+select = ["E", "W", "F", "I", "TID", "ANN"]
+
+[tool.ruff.lint.isort]
+# Tell isort that 'chat_librarian' is our own first-party code.
+known-first-party = ["chat_librarian"]
+
+[tool.ruff.format]
+# Use double quotes for strings.
+quote-style = "double"
+
+# --- mypy Configuration ---
+[tool.mypy]
+# Enable strict type checking for the best quality.
+strict = true
+# Ignore errors from missing type stubs in third-party libraries we don't control.
+ignore_missing_imports = true
