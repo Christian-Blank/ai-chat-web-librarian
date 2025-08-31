@@ -7,20 +7,38 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from chat_librarian.downloader import ChatDownloader
+from chat_librarian.base_downloader import BaseChatDownloader
+from chat_librarian.chatgpt_downloader import ChatGPTDownloader
+from chat_librarian.gemini_downloader import GeminiDownloader
 
 app = typer.Typer(
     name="chat-librarian",
-    help="A CLI to download your ChatGPT conversations.",
+    help="A CLI to download your chat conversations from various platforms.",
     add_completion=False,
     no_args_is_help=True,
 )
 console = Console()
 
 
-async def run_interactive_session(port: Optional[int], first_run: bool) -> None:
+def get_downloader(
+    platform: str, port: Optional[int], first_run: bool
+) -> BaseChatDownloader:
+    """Factory function to create the appropriate downloader based on platform."""
+    if platform.lower() == "chatgpt":
+        return ChatGPTDownloader(connect_port=port, is_first_run=first_run)
+    elif platform.lower() == "gemini":
+        return GeminiDownloader(connect_port=port, is_first_run=first_run)
+    else:
+        raise ValueError(
+            f"Unsupported platform: {platform}. Supported: chatgpt, gemini"
+        )
+
+
+async def run_interactive_session(
+    platform: str, port: Optional[int], first_run: bool
+) -> None:
     """Handles the interactive chat selection and download."""
-    async with ChatDownloader(connect_port=port, is_first_run=first_run) as downloader:
+    async with get_downloader(platform, port, first_run) as downloader:
         with console.status("[bold green]Fetching chat list..."):
             chats = await downloader.list_chats()
 
@@ -29,7 +47,7 @@ async def run_interactive_session(port: Optional[int], first_run: bool) -> None:
             return
 
         table = Table(
-            title="Available ChatGPT Conversations",
+            title=f"Available {downloader.platform_name} Conversations",
             show_header=True,
             header_style="bold magenta",
         )
@@ -66,7 +84,8 @@ async def run_interactive_session(port: Optional[int], first_run: bool) -> None:
 
             console.print(
                 Panel(
-                    f"[bold green]✅ Success![/bold green]\n\nConversation saved to:\n[cyan]{saved_file_path}[/cyan]",
+                    f"[bold green]✅ Success![/bold green]\n\n"
+                    f"Conversation saved to:\n[cyan]{saved_file_path}[/cyan]",
                     title="Download Complete",
                     border_style="green",
                 )
@@ -74,14 +93,20 @@ async def run_interactive_session(port: Optional[int], first_run: bool) -> None:
 
         except (ValueError, IndexError):
             console.print(
-                "[bold red]Invalid input. Please enter a number from the list.[/bold red]"
+                "[bold red]Invalid input. Please enter a number from the "
+                "list.[/bold red]"
             )
 
 
-@app.command(  # type: ignore[misc]
+@app.command(
     name="select", help="Select a chat to download from an interactive list. [default]"
 )
 def select_chat(
+    platform: str = typer.Option(
+        "chatgpt",
+        "--platform",
+        help="Platform to download from (chatgpt, gemini).",
+    ),
     port: Optional[int] = typer.Option(
         None,
         "--port",
@@ -95,15 +120,20 @@ def select_chat(
 ) -> None:
     """The default command, allowing interactive chat selection."""
     if first_run:
+        platform_name = (
+            "your account" if platform.lower() == "gemini" else "your OpenAI account"
+        )
         console.print(
             Panel(
-                "[bold yellow]ACTION REQUIRED[/bold yellow]\n\nA browser window will open. Please log in to your OpenAI account. The script will continue automatically after you're logged in.",
+                f"[bold yellow]ACTION REQUIRED[/bold yellow]\n\n"
+                f"A browser window will open. Please log in to {platform_name}. "
+                f"The script will continue automatically after you're logged in.",
                 title="First-Time Setup",
             )
         )
 
     try:
-        asyncio.run(run_interactive_session(port, first_run))
+        asyncio.run(run_interactive_session(platform, port, first_run))
     except Error as e:
         console.print(
             Panel(
@@ -117,8 +147,13 @@ def select_chat(
         console.print("\n[bold yellow]Operation cancelled by user.[/bold yellow]")
 
 
-@app.command(name="last", help="Quickly download the most recent chat.")  # type: ignore[misc]
+@app.command(name="last", help="Quickly download the most recent chat.")
 def download_last(
+    platform: str = typer.Option(
+        "chatgpt",
+        "--platform",
+        help="Platform to download from (chatgpt, gemini).",
+    ),
     port: Optional[int] = typer.Option(
         None,
         "--port",
@@ -132,17 +167,20 @@ def download_last(
 ) -> None:
     """Downloads the most recent chat non-interactively."""
     if first_run:
+        platform_name = (
+            "your account" if platform.lower() == "gemini" else "your OpenAI account"
+        )
         console.print(
             Panel(
-                "[bold yellow]ACTION REQUIRED[/bold yellow]\n\nA browser window will open. Please log in to your OpenAI account. The script will continue automatically after you're logged in.",
+                f"[bold yellow]ACTION REQUIRED[/bold yellow]\n\n"
+                f"A browser window will open. Please log in to {platform_name}. "
+                f"The script will continue automatically after you're logged in.",
                 title="First-Time Setup",
             )
         )
 
     async def run_last_session() -> None:
-        async with ChatDownloader(
-            connect_port=port, is_first_run=first_run
-        ) as downloader:
+        async with get_downloader(platform, port, first_run) as downloader:
             with console.status("[bold green]Fetching chat list..."):
                 chats = await downloader.list_chats()
 
@@ -158,7 +196,8 @@ def download_last(
 
             console.print(
                 Panel(
-                    f"[bold green]✅ Success![/bold green]\n\nConversation saved to:\n[cyan]{saved_file_path}[/cyan]",
+                    f"[bold green]✅ Success![/bold green]\n\n"
+                    f"Conversation saved to:\n[cyan]{saved_file_path}[/cyan]",
                     title="Download Complete",
                     border_style="green",
                 )
@@ -179,12 +218,17 @@ def download_last(
         console.print("\n[bold yellow]Operation cancelled by user.[/bold yellow]")
 
 
-@app.command(  # type: ignore[misc]
+@app.command(
     name="title", help="Download a specific chat by its full title (case-insensitive)."
 )
 def by_title(
     title: str = typer.Argument(
         ..., help="The exact, case-insensitive title of the chat to download."
+    ),
+    platform: str = typer.Option(
+        "chatgpt",
+        "--platform",
+        help="Platform to download from (chatgpt, gemini).",
     ),
     port: Optional[int] = typer.Option(
         None, "--port", help="Connect to a running Chrome instance on this port."
@@ -197,23 +241,27 @@ def by_title(
 ) -> None:
     """Downloads a chat by matching its title."""
     if first_run:
+        platform_name = (
+            "your account" if platform.lower() == "gemini" else "your OpenAI account"
+        )
         console.print(
             Panel(
-                "[bold yellow]ACTION REQUIRED[/bold yellow]\n\nA browser window will open. Please log in to your OpenAI account. The script will continue automatically after you're logged in.",
+                f"[bold yellow]ACTION REQUIRED[/bold yellow]\n\n"
+                f"A browser window will open. Please log in to {platform_name}. "
+                f"The script will continue automatically after you're logged in.",
                 title="First-Time Setup",
             )
         )
 
     async def run_title_session() -> None:
-        async with ChatDownloader(
-            connect_port=port, is_first_run=first_run
-        ) as downloader:
+        async with get_downloader(platform, port, first_run) as downloader:
             with console.status(f"[bold green]Searching for chat titled '{title}'..."):
                 saved_file_path = await downloader.download_chat_by_title(title)
 
             console.print(
                 Panel(
-                    f"[bold green]✅ Success![/bold green]\n\nConversation saved to:\n[cyan]{saved_file_path}[/cyan]",
+                    f"[bold green]✅ Success![/bold green]\n\n"
+                    f"Conversation saved to:\n[cyan]{saved_file_path}[/cyan]",
                     title="Download Complete",
                     border_style="green",
                 )
