@@ -10,6 +10,7 @@ from rich.table import Table
 from chat_librarian.base_downloader import BaseChatDownloader
 from chat_librarian.chatgpt_downloader import ChatGPTDownloader
 from chat_librarian.gemini_downloader import GeminiDownloader
+from chat_librarian.logging_config import configure_logging, get_logger
 
 app = typer.Typer(
     name="chat-librarian",
@@ -117,8 +118,17 @@ def select_chat(
         "--first-run",
         help="For standalone mode: Run in a visible browser for the first time.",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Enable debug logging for verbose output.",
+    ),
 ) -> None:
     """The default command, allowing interactive chat selection."""
+    # Configure logging
+    configure_logging(debug=debug)
+    logger = get_logger()
+    logger.info("Starting chat selection", platform=platform, debug=debug)
     if first_run:
         platform_name = (
             "your account" if platform.lower() == "gemini" else "your OpenAI account"
@@ -164,8 +174,17 @@ def download_last(
         "--first-run",
         help="For standalone mode: Run in a visible browser for the first time.",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Enable debug logging for verbose output.",
+    ),
 ) -> None:
     """Downloads the most recent chat non-interactively."""
+    # Configure logging
+    configure_logging(debug=debug)
+    logger = get_logger()
+    logger.info("Starting last chat download", platform=platform, debug=debug)
     if first_run:
         platform_name = (
             "your account" if platform.lower() == "gemini" else "your OpenAI account"
@@ -238,8 +257,19 @@ def by_title(
         "--first-run",
         help="For standalone mode: Run in a visible browser for the first time.",
     ),
+    debug: bool = typer.Option(
+        False,
+        "--debug",
+        help="Enable debug logging for verbose output.",
+    ),
 ) -> None:
     """Downloads a chat by matching its title."""
+    # Configure logging
+    configure_logging(debug=debug)
+    logger = get_logger()
+    logger.info(
+        "Starting chat download by title", platform=platform, title=title, debug=debug
+    )
     if first_run:
         platform_name = (
             "your account" if platform.lower() == "gemini" else "your OpenAI account"

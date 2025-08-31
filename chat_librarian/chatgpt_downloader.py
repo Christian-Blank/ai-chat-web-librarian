@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -5,6 +6,13 @@ from bs4 import BeautifulSoup, NavigableString, Tag
 from playwright.async_api import Error, Locator, Page
 
 from chat_librarian.base_downloader import BaseChatDownloader
+from chat_librarian.logging_config import (
+    get_logger,
+    log_platform_action,
+    log_selector_attempt,
+    log_selector_success,
+    log_timing,
+)
 
 CHATGPT_URL: str = "https://chat.openai.com"
 OUTPUT_DIR: Path = Path.cwd() / "ChatGPT_Downloads"
@@ -30,28 +38,39 @@ class ChatGPTDownloader(BaseChatDownloader):
 
     async def _platform_init(self) -> None:
         """Handle ChatGPT-specific initialization."""
+        logger = get_logger()
         if self.page is None:
             raise RuntimeError("Page is not initialized")
 
-        print("Checking for and dismissing any post-login modals...")
+        log_platform_action(
+            "Checking for and dismissing any post-login modals", "ChatGPT"
+        )
         try:
             dismiss_button = self.page.get_by_role("button", name="Okay, let's go")
             await dismiss_button.click(timeout=5000)
-            print("Dismissed a welcome modal.")
+            log_platform_action("Dismissed a welcome modal", "ChatGPT")
         except Error:
-            print("No initial modal found. Continuing.")
+            logger.info("No initial modal found. Continuing", platform="ChatGPT")
 
     async def list_chats(self) -> List[Dict[str, Any]]:
         """List all ChatGPT conversations."""
-        print("Waiting for chat history to be fully loaded...")
+        logger = get_logger()
+        start_time = time.time()
+        log_platform_action("Waiting for ChatGPT chat history to be loaded", "ChatGPT")
+
         if self.page is None:
             raise RuntimeError("Page is not initialized")
 
         history_container = self.page.locator(HISTORY_CONTAINER_SELECTOR)
         chat_links_locator = history_container.locator(CHAT_LINK_SELECTOR)
-        await chat_links_locator.first.wait_for()
 
-        print("Chat history is loaded. Scrolling to reveal all conversations...")
+        log_selector_attempt(CHAT_LINK_SELECTOR, "ChatGPT")
+        await chat_links_locator.first.wait_for()
+        log_selector_success(CHAT_LINK_SELECTOR, 1, "ChatGPT")
+
+        log_platform_action(
+            "Chat history is loaded. Scrolling to reveal all conversations", "ChatGPT"
+        )
         last_count = 0
         scroll_attempts = 0
         max_scroll_attempts = 5
@@ -61,7 +80,9 @@ class ChatGPTDownloader(BaseChatDownloader):
             await self.page.mouse.wheel(0, 1000)
             await self.page.wait_for_timeout(1500)
             current_count = await chat_links_locator.count()
-            print(f"  ...found {current_count} chats so far.")
+            logger.debug(
+                "Found chats during scrolling", count=current_count, platform="ChatGPT"
+            )
 
             if current_count == last_count:
                 scroll_attempts += 1
@@ -69,7 +90,7 @@ class ChatGPTDownloader(BaseChatDownloader):
                 scroll_attempts = 0
             last_count = current_count
 
-        print(f"Finished scrolling. Total chats found: {last_count}")
+        logger.info("Finished scrolling", total_chats=last_count, platform="ChatGPT")
         all_chats = await chat_links_locator.all()
         chat_data = []
 
@@ -81,7 +102,15 @@ class ChatGPTDownloader(BaseChatDownloader):
                         {"index": i, "title": title.strip(), "locator": chat_locator}
                     )
             except Error:
-                print(f"Warning: Could not read title for chat at index {i}. Skipping.")
+                logger.warning(
+                    "Could not read title for chat", index=i, platform="ChatGPT"
+                )
+
+        # Log timing and results
+        duration_ms = (time.time() - start_time) * 1000
+        log_timing(
+            "Chat history loaded", duration_ms, "ChatGPT", chat_count=len(chat_data)
+        )
 
         return sorted(chat_data, key=lambda x: x["index"], reverse=True)
 
@@ -90,7 +119,7 @@ class ChatGPTDownloader(BaseChatDownloader):
         if self.page is None:
             raise RuntimeError("Page is not initialized")
 
-        print(f"Targeting chat: '{chat_title}'")
+        log_platform_action("Targeting ChatGPT chat", "ChatGPT", chat_title=chat_title)
         await chat_locator.click()
 
         downloaded_content = await self._extract_conversation_content(self.page)
@@ -98,14 +127,23 @@ class ChatGPTDownloader(BaseChatDownloader):
 
     async def _extract_conversation_content(self, page: Page) -> str:
         """Extract and format ChatGPT conversation content."""
-        print("Waiting for chat content to be fully loaded...")
+        logger = get_logger()
+        log_platform_action(
+            "Waiting for ChatGPT chat content to be fully loaded", "ChatGPT"
+        )
+
+        log_selector_attempt(MESSAGE_AUTHOR_BLOCK_SELECTOR, "ChatGPT")
         await page.locator(MESSAGE_AUTHOR_BLOCK_SELECTOR).first.wait_for()
         await page.wait_for_load_state("networkidle", timeout=30000)
-        print("Chat content is loaded.")
+        log_platform_action("ChatGPT chat content is loaded", "ChatGPT")
 
         formatted_text: list[str] = []
         message_blocks = await page.locator(MESSAGE_AUTHOR_BLOCK_SELECTOR).all()
-        print(f"Parsing content from {len(message_blocks)} message blocks...")
+        logger.info(
+            "Parsing ChatGPT content from message blocks",
+            message_count=len(message_blocks),
+            platform="ChatGPT",
+        )
 
         for i, block in enumerate(message_blocks):
             role = await block.get_attribute("data-message-author-role")
@@ -124,7 +162,12 @@ class ChatGPTDownloader(BaseChatDownloader):
             formatted_text.append(f"### {role_display}\n\n{content_text}\n\n---\n")
 
             if (i + 1) % 5 == 0:
-                print(f"  ...parsed message {i + 1}/{len(message_blocks)}")
+                logger.debug(
+                    "Parsing progress",
+                    current=i + 1,
+                    total=len(message_blocks),
+                    platform="ChatGPT",
+                )
 
         return "\n".join(formatted_text)
 
@@ -166,9 +209,7 @@ class ChatGPTDownloader(BaseChatDownloader):
                             if lang_class:
                                 code_language = lang_class[0].replace("language-", "")
                     code_element = element.find("code")
-                    code_text = (
-                        code_element.get_text() if code_element else ""
-                    )
+                    code_text = code_element.get_text() if code_element else ""
                     content_parts.append(f"```{code_language}\n{code_text}\n```")
                 elif element.name in ["h1", "h2", "h3", "h4"]:
                     level = int(element.name[1])

@@ -106,6 +106,34 @@ chat-librarian last --first-run
 chat-librarian last --platform gemini --first-run
 ```
 
+### Debug Mode
+
+For troubleshooting issues or getting detailed information about what the tool is doing, you can enable debug mode by adding the `--debug` flag to any command. This provides verbose logging with timing information, selector attempts, and detailed progress updates.
+
+**Example with debug mode:**
+```bash
+chat-librarian select --platform gemini --first-run --debug
+```
+
+**Debug output includes:**
+- Detailed selector attempts and results
+- Performance timing for operations
+- Platform-specific context information
+- Enhanced error reporting with stack traces
+
+**Production mode (default)** shows clean, user-friendly output:
+```
+ℹ️  [Gemini] Waiting for Gemini chat history to be loaded
+ℹ️  [Gemini] Found 'Recent' section - chat history is loaded (586ms)
+```
+
+**Debug mode** shows detailed technical information:
+```
+2024-01-30T18:45:00.123456Z [info] [Gemini] Waiting for Gemini chat history to be loaded
+2024-01-30T18:45:00.234567Z [debug] [Gemini] Trying selector (selector: text=Recent)
+2024-01-30T18:45:00.345678Z [info] [Gemini] Selector found elements (selector: text=Recent, found: 1)
+```
+
 ### Known Issues
 
 -   **Headless Mode**: Currently, running the tool in headless mode (i.e., without the `--first-run` flag) is unstable and may result in a timeout. For reliable operation, please use the `--first-run` flag for all commands, which will open a visible browser window to perform the automation. This will be addressed in a future update.

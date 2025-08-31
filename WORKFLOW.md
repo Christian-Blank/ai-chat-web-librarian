@@ -59,6 +59,7 @@ This project uses `ruff` for formatting/linting and `mypy` for type checking. Be
   - **`base_downloader.py`**: Abstract base class that defines the common interface and shared functionality for all platform downloaders.
   - **`chatgpt_downloader.py`**: ChatGPT-specific implementation of the downloader, handling OpenAI authentication and ChatGPT DOM parsing.
   - **`gemini_downloader.py`**: Gemini-specific implementation of the downloader, handling Google authentication and Gemini DOM parsing.
+  - **`logging_config.py`**: Structured logging configuration with production and debug modes, providing detailed troubleshooting capabilities.
 
 ## Running the Tool in Development
 

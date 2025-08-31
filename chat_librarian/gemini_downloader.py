@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -5,6 +6,15 @@ from bs4 import BeautifulSoup
 from playwright.async_api import Error, Locator, Page
 
 from chat_librarian.base_downloader import BaseChatDownloader
+from chat_librarian.logging_config import (
+    get_logger,
+    log_error,
+    log_platform_action,
+    log_selector_attempt,
+    log_selector_failure,
+    log_selector_success,
+    log_timing,
+)
 
 GEMINI_URL: str = "https://gemini.google.com/app"
 OUTPUT_DIR: Path = Path.cwd() / "Gemini_Downloads"
@@ -35,36 +45,57 @@ class GeminiDownloader(BaseChatDownloader):
 
     async def _platform_init(self) -> None:
         """Handle Gemini-specific initialization."""
-        print("Checking for Google authentication and any modals...")
+        logger = get_logger()
+        log_platform_action(
+            "Checking for Google authentication and any modals", "Gemini"
+        )
         if self.page is None:
             raise RuntimeError("Page is not initialized")
 
         # Wait for the page to load and check if we're logged in
         try:
-            # Look for the typical Gemini interface elements
+            log_selector_attempt("mat-sidenav", "Gemini")
             await self.page.wait_for_selector("mat-sidenav", timeout=10000)
-            print("Gemini interface loaded successfully.")
+            log_platform_action("Gemini interface loaded successfully", "Gemini")
         except Error:
-            print("Gemini interface not immediately available - may need to log in.")
+            logger.warning(
+                "Gemini interface not immediately available - may need to log in",
+                platform="Gemini",
+            )
 
         # Give some time for any modals or initialization to complete
         await self.page.wait_for_timeout(2000)
 
     async def list_chats(self) -> List[Dict[str, Any]]:
         """List all Gemini conversations."""
-        print("Waiting for Gemini chat history to be loaded...")
+        logger = get_logger()
+        start_time = time.time()
+        log_platform_action("Waiting for Gemini chat history to be loaded", "Gemini")
+
         if self.page is None:
             raise RuntimeError("Page is not initialized")
 
-        # Wait for the sidebar to be present
-        await self.page.wait_for_selector(
-            CHAT_HISTORY_CONTAINER_SELECTOR, timeout=30000
-        )
+        # Wait for the "Recent" heading to appear, which indicates chat history
+        # is loaded
+        try:
+            log_selector_attempt("text=Recent", "Gemini")
+            await self.page.wait_for_selector("text=Recent", timeout=30000)
+            log_selector_success("text=Recent", 1, "Gemini")
+            log_platform_action(
+                "Found 'Recent' section - chat history is loaded", "Gemini"
+            )
+        except Error:
+            logger.warning(
+                "Could not find 'Recent' section, trying alternative selectors",
+                platform="Gemini",
+            )
+            # Fallback: wait for the sidebar container
+            log_selector_attempt(CHAT_HISTORY_CONTAINER_SELECTOR, "Gemini")
+            await self.page.wait_for_selector(
+                CHAT_HISTORY_CONTAINER_SELECTOR, timeout=30000
+            )
 
-        # Look for chat history items within the sidebar
-        # We need to be more flexible with selectors since the exact structure
-        # might vary
-        print("Searching for chat history items...")
+        log_platform_action("Searching for chat history items", "Gemini")
 
         # Try different possible selectors for chat items
         possible_chat_selectors = [
@@ -77,9 +108,10 @@ class GeminiDownloader(BaseChatDownloader):
         chat_elements = []
         for selector in possible_chat_selectors:
             try:
+                log_selector_attempt(selector, "Gemini")
                 elements = await self.page.locator(selector).all()
                 if elements:
-                    print(f"Found {len(elements)} elements with selector: {selector}")
+                    log_selector_success(selector, len(elements), "Gemini")
                     # Filter elements that likely represent chats (contain text)
                     for element in elements:
                         try:
@@ -89,11 +121,16 @@ class GeminiDownloader(BaseChatDownloader):
                         except Error:
                             continue
                     break
+                else:
+                    log_selector_failure(selector, "Gemini")
             except Error:
-                continue
+                log_selector_failure(selector, "Gemini")
 
         if not chat_elements:
-            print("No chat elements found, trying to scroll and search again...")
+            logger.info(
+                "No chat elements found, trying to scroll and search again",
+                platform="Gemini",
+            )
             # Try scrolling to load more chats
             sidebar = self.page.locator(CHAT_HISTORY_CONTAINER_SELECTOR)
             await sidebar.scroll_into_view_if_needed()
@@ -103,8 +140,10 @@ class GeminiDownloader(BaseChatDownloader):
             # Retry finding elements
             for selector in possible_chat_selectors:
                 try:
+                    log_selector_attempt(selector, "Gemini")
                     elements = await self.page.locator(selector).all()
                     if elements:
+                        log_selector_success(selector, len(elements), "Gemini")
                         for element in elements:
                             try:
                                 text = await element.inner_text()
@@ -114,10 +153,14 @@ class GeminiDownloader(BaseChatDownloader):
                                 continue
                         if chat_elements:
                             break
+                    else:
+                        log_selector_failure(selector, "Gemini")
                 except Error:
-                    continue
+                    log_selector_failure(selector, "Gemini")
 
-        print(f"Found {len(chat_elements)} potential chat elements")
+        logger.info(
+            "Found potential chat elements", count=len(chat_elements), platform="Gemini"
+        )
 
         chat_data = []
         for i, chat_element in enumerate(chat_elements):
@@ -131,10 +174,20 @@ class GeminiDownloader(BaseChatDownloader):
                         chat_data.append(
                             {"index": i, "title": clean_title, "locator": chat_element}
                         )
-            except Error:
-                print(f"Warning: Could not read title for chat at index {i}. Skipping.")
+            except Error as e:
+                logger.debug(
+                    "Could not read title for chat element",
+                    index=i,
+                    platform="Gemini",
+                    error=str(e),
+                )
 
-        print(f"Successfully parsed {len(chat_data)} chat conversations")
+        # Log timing and results
+        duration_ms = (time.time() - start_time) * 1000
+        log_timing(
+            "Chat history loaded", duration_ms, "Gemini", chat_count=len(chat_data)
+        )
+
         return sorted(chat_data, key=lambda x: x["index"], reverse=True)
 
     async def download_chat(self, chat_title: str, chat_locator: Locator) -> Path:
@@ -142,7 +195,7 @@ class GeminiDownloader(BaseChatDownloader):
         if self.page is None:
             raise RuntimeError("Page is not initialized")
 
-        print(f"Targeting Gemini chat: '{chat_title}'")
+        log_platform_action("Targeting Gemini chat", "Gemini", chat_title=chat_title)
         await chat_locator.click()
 
         # Wait for the conversation to load
@@ -153,16 +206,25 @@ class GeminiDownloader(BaseChatDownloader):
 
     async def _extract_conversation_content(self, page: Page) -> str:
         """Extract and format Gemini conversation content."""
-        print("Waiting for Gemini chat content to be fully loaded...")
+        logger = get_logger()
+        log_platform_action(
+            "Waiting for Gemini chat content to be fully loaded", "Gemini"
+        )
 
         # Wait for conversation container
         try:
+            log_selector_attempt(CONVERSATION_CONTAINER_SELECTOR, "Gemini")
             await page.wait_for_selector(CONVERSATION_CONTAINER_SELECTOR, timeout=10000)
+            log_selector_success(CONVERSATION_CONTAINER_SELECTOR, 1, "Gemini")
         except Error:
+            logger.warning(
+                "Could not find conversation container, using timeout fallback",
+                platform="Gemini",
+            )
             # Fallback to waiting for any message content
             await page.wait_for_timeout(3000)
 
-        print("Gemini chat content loaded, extracting messages...")
+        log_platform_action("Gemini chat content loaded, extracting messages", "Gemini")
 
         formatted_text: list[str] = []
 
@@ -172,9 +234,11 @@ class GeminiDownloader(BaseChatDownloader):
             user_messages = await page.locator(USER_MESSAGE_SELECTOR).all()
             assistant_messages = await page.locator(ASSISTANT_MESSAGE_SELECTOR).all()
 
-            print(
-                f"Found {len(user_messages)} user messages and "
-                f"{len(assistant_messages)} assistant messages"
+            logger.info(
+                "Found message elements",
+                user_messages=len(user_messages),
+                assistant_messages=len(assistant_messages),
+                platform="Gemini",
             )
 
             # If we have specific message elements, process them
@@ -212,7 +276,10 @@ class GeminiDownloader(BaseChatDownloader):
 
             else:
                 # Fallback: try to extract all text content from the conversation area
-                print("Fallback: extracting general conversation content...")
+                logger.info(
+                    "Fallback: extracting general conversation content",
+                    platform="Gemini",
+                )
                 conversation_area = page.locator(CONVERSATION_CONTAINER_SELECTOR)
                 if await conversation_area.count() > 0:
                     content = await conversation_area.first.inner_text()
@@ -222,7 +289,7 @@ class GeminiDownloader(BaseChatDownloader):
                         )
 
         except Error as e:
-            print(f"Error extracting conversation: {e}")
+            log_error("Error extracting conversation", e, "Gemini")
             # Final fallback - get all visible text
             try:
                 body_text = await page.locator("body").inner_text()

@@ -5,12 +5,13 @@ description = "A CLI tool to archive ChatGPT and Gemini conversations."
 authors = [{ name = "Christian Blank", email = "christian@blank.dev" }]
 requires-python = ">=3.13"
 dependencies = [
-    "typer>=0.16.0",
-    "rich>=14.1.0",
-    "playwright>=1.54.0",
-    "playwright-stealth>=2.0.0",
-    "beautifulsoup4>=4.13.4",
-    "lxml>=6.0.0",
+    "typer[all]>=0.9.0",
+    "playwright>=1.40.0",
+    "playwright-stealth>=1.0.6",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+    "rich>=13.0.0",
+    "structlog>=23.1.0",
 ]
 
 [project.scripts]
